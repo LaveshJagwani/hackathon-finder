@@ -72,3 +72,11 @@ playwright-report/
 # Node artifacts (if you later add frontend)
 # ==============================
 node_modules/
+
+# Dev / Debug tools
+capture_devfolio_api.py
+debug_*.py
+search.py
+test_*.py
+devfolio_hackathons.json
+list_groq_models.py
