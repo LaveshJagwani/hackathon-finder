@@ -1,26 +1,30 @@
 from fastapi import FastAPI, Depends, Query
 from sqlalchemy.orm import Session
 from typing import Optional, List
+from sqlalchemy import func
+import time
+
 from database import SessionLocal
 from models import Hackathon
+from schemas import HackathonResponse
 from filter_query import apply_filters
 from nl_parser import parse_query
-import time
-from sqlalchemy import func
-from database import SessionLocal
-from models import Hackathon
-
-# Simple in-memory cache
-LLM_CACHE = {}
-CACHE_TTL = 300  # seconds
 
 
 app = FastAPI(title="Hackathon Finder API")
 
 
-# ---------------------------------------
+# ======================================================
+# In-memory LLM Cache
+# ======================================================
+
+LLM_CACHE = {}
+CACHE_TTL = 300  # 5 minutes
+
+
+# ======================================================
 # DB Dependency
-# ---------------------------------------
+# ======================================================
 
 def get_db():
     db = SessionLocal()
@@ -30,31 +34,46 @@ def get_db():
         db.close()
 
 
-# ---------------------------------------
-# Health Check
-# ---------------------------------------
+# ======================================================
+# Health & Root
+# ======================================================
 
 @app.get("/")
 def root():
     return {"status": "Hackathon Finder API running"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ======================================================
+# Stats Endpoint
+# ======================================================
 
 @app.get("/stats")
-def get_stats():
-    db = SessionLocal()
+def get_stats(db: Session = Depends(get_db)):
 
     total = db.query(func.count(Hackathon.id)).scalar()
-    online = db.query(func.count(Hackathon.id)).filter(Hackathon.is_online == True).scalar()
-    offline = db.query(func.count(Hackathon.id)).filter(Hackathon.is_online == False).scalar()
+
+    online = (
+        db.query(func.count(Hackathon.id))
+        .filter(Hackathon.is_online == True)
+        .scalar()
+    )
+
+    offline = (
+        db.query(func.count(Hackathon.id))
+        .filter(Hackathon.is_online == False)
+        .scalar()
+    )
 
     by_source = (
         db.query(Hackathon.source, func.count(Hackathon.id))
         .group_by(Hackathon.source)
         .all()
     )
-
-    db.close()
 
     return {
         "total_hackathons": total,
@@ -63,14 +82,16 @@ def get_stats():
         "by_source": {source: count for source, count in by_source}
     }
 
-# ---------------------------------------
-# Basic Filter Search
-# ---------------------------------------
-@app.get("/health")
-def health():
-    return {"status": "ok"}
 
-@app.get("/search")
+# ======================================================
+# Structured Filter Search
+# ======================================================
+
+@app.get(
+    "/search",
+    response_model=List[HackathonResponse],
+    response_model_exclude_none=True
+)
 def search_hackathons(
     location: Optional[str] = None,
     theme: Optional[str] = None,
@@ -99,8 +120,6 @@ def search_hackathons(
     base_query = db.query(Hackathon)
     filtered_query = apply_filters(base_query, filters)
 
-    total = filtered_query.count()
-
     results = (
         filtered_query
         .offset(offset)
@@ -108,66 +127,48 @@ def search_hackathons(
         .all()
     )
 
-    return {
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "results": [
-            {
-                "name": h.name,
-                "url": h.url,
-                "start_date": h.start_date,
-                "end_date": h.end_date,
-                "registration_deadline": h.registration_deadline,
-                "is_online": h.is_online,
-                "city": h.city,
-                "state": h.state,
-                "country": h.country,
-                "source": h.source
-            }
-            for h in results
-        ]
-    }
+    return results
 
-# ---------------------------------------
+
+# ======================================================
 # LLM Natural Language Search
-# ---------------------------------------
-@app.get("/chat-search")
+# ======================================================
+
+@app.get(
+    "/chat_search",
+    response_model=List[HackathonResponse],
+    response_model_exclude_none=True
+)
 def chat_search(
-    q: str,
+    query: str,
     limit: int = Query(20, le=100),
     offset: int = 0,
     db: Session = Depends(get_db)
 ):
 
-    now = time.time()
+    current_time = time.time()
 
-    # -------------------------
-    # CHECK CACHE
-    # -------------------------
-    if q in LLM_CACHE:
-        cached_entry = LLM_CACHE[q]
-
-        if now - cached_entry["timestamp"] < CACHE_TTL:
-            filters = cached_entry["filters"]
+    # -------- LLM Caching --------
+    if query in LLM_CACHE:
+        cached_data = LLM_CACHE[query]
+        if current_time - cached_data["timestamp"] < CACHE_TTL:
+            filters = cached_data["filters"]
         else:
-            # expired
-            filters = parse_query(q)
-            LLM_CACHE[q] = {
+            filters = parse_query(query)
+            LLM_CACHE[query] = {
                 "filters": filters,
-                "timestamp": now
+                "timestamp": current_time
             }
     else:
-        filters = parse_query(q)
-        LLM_CACHE[q] = {
+        filters = parse_query(query)
+        LLM_CACHE[query] = {
             "filters": filters,
-            "timestamp": now
+            "timestamp": current_time
         }
 
+    # -------- Apply Filters --------
     base_query = db.query(Hackathon)
     filtered_query = apply_filters(base_query, filters)
-
-    total = filtered_query.count()
 
     results = (
         filtered_query
@@ -176,22 +177,4 @@ def chat_search(
         .all()
     )
 
-    return {
-        "extracted_filters": filters,
-        "cached": q in LLM_CACHE,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "results": [
-            {
-                "name": h.name,
-                "url": h.url,
-                "start_date": h.start_date,
-                "registration_deadline": h.registration_deadline,
-                "city": h.city,
-                "country": h.country,
-                "source": h.source
-            }
-            for h in results
-        ]
-    }
+    return results
