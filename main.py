@@ -6,6 +6,9 @@ from models import Hackathon
 from filter_query import apply_filters
 from nl_parser import parse_query
 import time
+from sqlalchemy import func
+from database import SessionLocal
+from models import Hackathon
 
 # Simple in-memory cache
 LLM_CACHE = {}
@@ -36,9 +39,36 @@ def root():
     return {"status": "Hackathon Finder API running"}
 
 
+
+@app.get("/stats")
+def get_stats():
+    db = SessionLocal()
+
+    total = db.query(func.count(Hackathon.id)).scalar()
+    online = db.query(func.count(Hackathon.id)).filter(Hackathon.is_online == True).scalar()
+    offline = db.query(func.count(Hackathon.id)).filter(Hackathon.is_online == False).scalar()
+
+    by_source = (
+        db.query(Hackathon.source, func.count(Hackathon.id))
+        .group_by(Hackathon.source)
+        .all()
+    )
+
+    db.close()
+
+    return {
+        "total_hackathons": total,
+        "online": online,
+        "offline": offline,
+        "by_source": {source: count for source, count in by_source}
+    }
+
 # ---------------------------------------
 # Basic Filter Search
 # ---------------------------------------
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.get("/search")
 def search_hackathons(
