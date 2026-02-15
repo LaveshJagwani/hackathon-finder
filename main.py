@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from sqlalchemy import func
@@ -84,7 +84,7 @@ def get_stats(db: Session = Depends(get_db)):
 
 
 # ======================================================
-# Structured Filter Search
+# Structured Filter Search (NO LIMITS)
 # ======================================================
 
 @app.get(
@@ -101,8 +101,6 @@ def search_hackathons(
     registration_deadline_before_days: Optional[int] = None,
     source: Optional[str] = None,
     sort_by: Optional[str] = None,
-    limit: int = Query(20, le=100),
-    offset: int = 0,
     db: Session = Depends(get_db)
 ):
 
@@ -120,18 +118,14 @@ def search_hackathons(
     base_query = db.query(Hackathon)
     filtered_query = apply_filters(base_query, filters)
 
-    results = (
-        filtered_query
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    # 🚀 Return ALL results
+    results = filtered_query.all()
 
     return results
 
 
 # ======================================================
-# LLM Natural Language Search
+# LLM Natural Language Search (NO LIMITS)
 # ======================================================
 
 @app.get(
@@ -141,8 +135,6 @@ def search_hackathons(
 )
 def chat_search(
     query: str,
-    limit: int = Query(20, le=100),
-    offset: int = 0,
     db: Session = Depends(get_db)
 ):
 
@@ -170,11 +162,7 @@ def chat_search(
     base_query = db.query(Hackathon)
     filtered_query = apply_filters(base_query, filters)
 
-    results = (
-        filtered_query
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    # 🚀 Return ALL results
+    results = filtered_query.all()
 
     return results
