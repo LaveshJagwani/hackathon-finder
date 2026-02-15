@@ -9,9 +9,25 @@ from models import Hackathon
 from schemas import HackathonResponse
 from filter_query import apply_filters
 from nl_parser import parse_query
+from fastapi.middleware.cors import CORSMiddleware
+
 
 
 app = FastAPI(title="Hackathon Finder API")
+
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://hack-finder-beta.vercel.app",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ======================================================
